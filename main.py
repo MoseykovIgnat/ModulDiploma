@@ -16,27 +16,21 @@ def create_connect_to_db(config):
 
 
 class Getters(object):
-    def __init__(self, quantum_5sec, source):
-        self.quantum_5sec = quantum_5sec  # example for 60 sec = 20
+    def __init__(self, interval_time, source):
+        self.interval_time = interval_time  # example for 60 sec = 20
         self.source = source
-        self.quantum_current = 0
+        self.expired_time = 0
 
-    def get_quantum_5sec(self):
-        return self.quantum_5sec
+    def update_time(self, load_time):
+        self.expired_time += load_time
 
-    def get_quantum_current(self):
-        return self.quantum_current
 
-    def set_quantum_start(self, new_amount):
-        self.quantum_current = new_amount
 
-    def increment_quantum_current(self):
-        self.quantum_current += 1
 
 
 class Db_getter(Getters):
-    def __init__(self, quantum_5sec, source):
-        super(Db_getter, self).__init__(quantum_5sec, source)
+    def __init__(self, interval_time, source):
+        super(Db_getter, self).__init__(interval_time, source)
         self.config = SQLParser.xxxdbrc.config(source)
         self.connection = create_connect_to_db(self.config)
         self.cursor = self.connection.cursor()
@@ -48,26 +42,31 @@ class Db_getter(Getters):
 
 class Clb_db_getter(Db_getter):
     def __init__(self):
-        super(Clb_db_getter, self).__init__(2, 'clb')
+        super(Clb_db_getter, self).__init__(10, 'clb')
 
     def cld_db_print(self):
-        print("Cld_worked (it's working every 10 sec)")
+        if self.interval_time <= self.expired_time:
+            print("Cld_worked (it's working every 10 sec)")
+            self.expired_time = 0
+
 
 
 class Adm_db_getter(Db_getter):
     def __init__(self):
-        super(Adm_db_getter, self).__init__(1, 'adm')
+        super(Adm_db_getter, self).__init__(5, 'adm')
 
     def adm_db_print(self):
-        print("adm_worked (it's working every 5 sec)")
+        if self.interval_time <= self.expired_time:
+            print("adm_worked (it's working every 5 sec)")
+            self.expired_time = 0
 
 
 def create_connection_djangodb():
-    connection = MySQLdb.connect(host='123',
-                                 user='21',
-                                 passwd='1',
-                                 db='3',
-                                 port=31306,
+    connection = MySQLdb.connect(host='-00.',
+                                 user='dsf',
+                                 passwd='sdfg',
+                                 db='dsfg',
+                                 port=123,
                                  charset='utf8')
     return connection
 
@@ -86,16 +85,12 @@ admdb = Adm_db_getter()
 
 while True:
     current_time = time.time()
-    if clbdb.get_quantum_current() == clbdb.get_quantum_5sec():
-        clbdb.cld_db_print()
-        clbdb.set_quantum_start(0)
-        break
-    if admdb.get_quantum_current() == admdb.get_quantum_5sec():
-        admdb.adm_db_print()
-        admdb.set_quantum_start(0)
-    clbdb.increment_quantum_current()
-    admdb.increment_quantum_current()
+    clbdb.cld_db_print()
+    admdb.adm_db_print()
     time.sleep(5 - ((time.time() - current_time) % 60.0))
+    lead_time = time.time() - current_time
+    clbdb.update_time(lead_time)
+    admdb.update_time(lead_time)
 
 close_cursor_connection(djangodb_cursor, djangodb_connection)
 clbdb.db_close_connection()

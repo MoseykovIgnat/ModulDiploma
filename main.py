@@ -5,6 +5,8 @@ import MySQLdb
 import SQLParser.xxxdbrc
 import time
 
+'''Возможность взять alias для temdbase from txt.file'''
+
 
 def create_alias_to_tem_db():
     d = dict()
@@ -48,6 +50,9 @@ class Connection_db(object):
         self.config = config
         self.connection = connection
         self.cursor = cursor
+
+
+'''Менеджер для поддержания и создания единственного подключения к каждой БД'''
 
 
 class Manager(object):
@@ -98,6 +103,7 @@ class Db_getter(Getters):
         self.db.connection.close()
 
 
+'''Геттеры с других БД на будущее'''
 # class Clb_db_getter(Db_getter):
 #     def __init__(self, db_manager, interval):
 #         super(Clb_db_getter, self).__init__(interval, 'clb', db_manager)
@@ -116,6 +122,9 @@ class Db_getter(Getters):
 #         if self.interval_time <= self.expired_time:
 #             print("adm_worked (it's working every 5 sec)")
 #             self.expired_time = 0
+
+
+'''Поиск всех id каналов для всех aliases'''
 
 
 class channels_tem_db_getter(Db_getter):
@@ -140,6 +149,9 @@ class channels_tem_db_getter(Db_getter):
         self.channels_tem_db = res
 
 
+'''Поиск переменной DC1'''
+
+
 class DC1_tem_db_getter(Db_getter):
     def __init__(self, db_manager):
         super(DC1_tem_db_getter, self).__init__(5, 'tem', db_manager)
@@ -157,14 +169,10 @@ class DC1_tem_db_getter(Db_getter):
             pass
 
 
-# class test_db_getter(Db_getter):
-#     def __init__(self, db_manager, interval):
-#         super(test_db_getter, self).__init__(interval, 'asdg', db_manager)
-
 '''Создаем подключение к БД DJNAGO для сеттеров'''
 djangodb_connection = create_connection_djangodb()
 djangodb_cursor = djangodb_connection.cursor()
-
+'''Словарь alias для temdbase'''
 alias_for_tem_db = {'LOCK': '/VEPP2K/STATUS/SND_INTERLOCK', 'FLT': '/SND/SCALERS/INTEGRALS/FLT',
                     'FLTinc': '/SND/SCALERS/INCREMENTS/FLT', 'ST': '/SND/SCALERS/INTEGRALS/ST', 'E_laser': '/EMS/E',
                     'dE_laser': '/EMS/DE', 'BEP_PMT': '/VEPP2K/STATUS/BEP_PMT', 'STinc': '/SND/SCALERS/INCREMENTS/ST',
@@ -192,16 +200,14 @@ alias_for_tem_db = {'LOCK': '/VEPP2K/STATUS/SND_INTERLOCK', 'FLT': '/SND/SCALERS
                     'GENCinc': '/SND/SCALERS/INCREMENTS/GENC'}  # Создали словарь alias для путей (parent)
 manager_of_db = Manager()  # создали менеджера db
 tem_ch = channels_tem_db_getter(manager_of_db)
-tem_ch.getter(alias_for_tem_db)
-print(tem_ch.channels_tem_db)
-
-results = dict()
+tem_ch.getter(alias_for_tem_db)  # метод для поиска всех id для temdbase
+results = dict()  # словарь для результатов (далее с его помощью будем заполнять БД django)
 
 # clbdb = Clb_db_getter(manager_of_db, 10)
 # admdb = Adm_db_getter(manager_of_db, 5)
 # test = test_db_getter(manager_of_db,5)
 DC1_getter = DC1_tem_db_getter(manager_of_db)
-DC1_getter2 = DC1_tem_db_getter(manager_of_db)
+DC1_getter2 = DC1_tem_db_getter(manager_of_db)  # Тест, что подключение только одно
 
 while True:
     current_time = time.time()

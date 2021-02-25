@@ -44,6 +44,25 @@ def close_cursor_connection(cursor, connection):
     print("Connection was closed")
 
 
+def getter_for_lastinteger_lastdouble(cursor, channel):
+    if channel.channel_type == 0:
+        cursor.execute("select c_value from t_lastinteger where c_channel=%s" % channel.channel_id)
+    if channel.channel_type == 1:
+        cursor.execute("select c_value from t_lastdouble where c_channel=%s" % channel.channel_id)
+    data = cursor.fetchall()
+    for x in data:
+        res = x['c_value']
+    return res
+
+
+def getter_for_lastdouble(cursor,channel):
+    cursor.execute("select c_value from t_lastdouble where c_channel=%s" % channel)
+    data = cursor.fetchall()
+    for x in data:
+        res = x['c_value']
+    return res
+
+
 class Connection_db(object):
     def __init__(self, db_name, config, connection, cursor):
         self.db_name = db_name
@@ -119,7 +138,7 @@ class Db_getter_setter(Getter_setter):
 
 class Setter_django(Db_getter_setter):
     def __init__(self, db_manager):
-        super(Setter_django, self).__init__(10, 'django_db', db_manager)
+        super(Setter_django, self).__init__(5, 'django_db', db_manager)
 
     def input_in_django_db(self, result):
         if self.interval_time <= self.expired_time:
@@ -157,9 +176,15 @@ class Setter_django(Db_getter_setter):
 '''Поиск всех id каналов для всех aliases'''
 
 
-class channels_tem_db_getter(Db_getter_setter):
+class Channel_id_and_type(object):
+    def __init__(self, channel_id, channel_type):
+        self.channel_id = channel_id
+        self.channel_type = channel_type
+
+
+class Channels_tem_db_getter(Db_getter_setter):
     def __init__(self, db_manager):
-        super(channels_tem_db_getter, self).__init__(3600, 'tem', db_manager)
+        super(Channels_tem_db_getter, self).__init__(3600, 'tem', db_manager)
         self.channels_tem_db = dict()
 
     def get_channels_tem_db(self):
@@ -175,29 +200,21 @@ class channels_tem_db_getter(Db_getter_setter):
             self.db.cursor.execute(query, args)
             data = self.db.cursor.fetchall()
             for a in data:
-                res[key] = a['id']
+                res[key] = Channel_id_and_type(a['id'], a['type'])
         self.channels_tem_db = res
 
 
 '''Поиск переменной DC1'''
-
-def getter_for_lastinteger(cursor,channel):
-    cursor.execute("select c_value from t_lastinteger where c_channel=%s" % channel)
-    data = cursor.fetchall()
-    for x in data:
-        res = x['c_value']
-    return res
-
 
 
 class DC1_tem_db_getter(Db_getter_setter):
     def __init__(self, db_manager):
         super(DC1_tem_db_getter, self).__init__(5, 'tem', db_manager)
 
-    def getter(self, channel, res_dict):
+    def getter(self, channel_type, res_dict):
         if self.interval_time <= self.expired_time:
             try:
-                res_dict['DC1'] = getter_for_lastinteger(self.db.cursor,channel)
+                res_dict['DC1'] = getter_for_lastinteger_lastdouble(self.db.cursor, channel_type)
                 print("Got DC1")
                 self.expired_time = 0
             except:
@@ -236,7 +253,7 @@ alias_for_tem_db = {'LOCK': '/VEPP2K/STATUS/SND_INTERLOCK', 'FLT': '/SND/SCALERS
                     'GENCinc': '/SND/SCALERS/INCREMENTS/GENC'}  # Создали словарь alias для путей (parent)
 manager_of_db = Manager()  # создали менеджера db
 setter_django = Setter_django(manager_of_db)    # Создали сеттер
-tem_ch = channels_tem_db_getter(manager_of_db)
+tem_ch = Channels_tem_db_getter(manager_of_db)
 tem_ch.getter(alias_for_tem_db)  # метод для поиска всех id для temdbase
 results = dict()  # словарь для результатов (далее с его помощью будем заполнять БД django)
 

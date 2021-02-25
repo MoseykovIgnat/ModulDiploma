@@ -62,11 +62,17 @@ class Manager(object):
     def get_db_con(self, name):
         if name not in self.data:
             try:
-                config = SQLParser.xxxdbrc.config(name)
-                connection = create_connect_to_db(config)
-                cursor = connection.cursor(MySQLdb.cursors.DictCursor)
-                self.data[name] = Connection_db(name, config, connection, cursor)
-                return self.data[name]
+                if name != 'django_db':
+                    config = SQLParser.xxxdbrc.config(name)
+                    connection = create_connect_to_db(config)
+                    cursor = connection.cursor(MySQLdb.cursors.DictCursor)
+                    self.data[name] = Connection_db(name, config, connection, cursor)
+                    return self.data[name]
+                if name == 'django_db':
+                    connection_django = create_connection_djangodb()
+                    cursor_django = connection_django.cursor(MySQLdb.cursors.DictCursor)
+                    self.data[name] = Connection_db(name, 0, connection_django, cursor_django)
+                    return self.data[name]
             except:
                 print("I can't connect to db: " + name)
         else:
@@ -76,14 +82,19 @@ class Manager(object):
         for c in self.data.values():
             if not c.connection:
                 try:
-                    c.config = SQLParser.xxxdbrc.config(c.name)
-                    c.connection = create_connect_to_db(c.config)
-                    c.cursor = c.connection.cursor()
+                    if c.name != 'django_db':
+                        c.config = SQLParser.xxxdbrc.config(c.name)
+                        c.connection = create_connect_to_db(c.config)
+                        c.cursor = c.connection.cursor(MySQLdb.cursors.DictCursor)
+                    else:
+                        c.connection = create_connection_djangodb()
+                        c.cursor = c.connection.cursor(MySQLdb.cursors.DictCursor)
+                        print("Reconnected to django db")
                 except:
                     print("I can't connect to db" + c.name)
 
 
-class Getters(object):
+class Getter_setter(object):
     def __init__(self, interval_time, source):
         self.interval_time = interval_time  # example for 60 sec = 20
         self.source = source
@@ -93,9 +104,9 @@ class Getters(object):
         self.expired_time += load_time
 
 
-class Db_getter(Getters):
+class Db_getter_setter(Getter_setter):
     def __init__(self, interval_time, source, db_manager):
-        super(Db_getter, self).__init__(interval_time, source)
+        super(Db_getter_setter, self).__init__(interval_time, source)
         self.db = Manager.get_db_con(db_manager, source)
 
     def db_close_connection(self):
@@ -103,8 +114,27 @@ class Db_getter(Getters):
         self.db.connection.close()
 
 
+'''Сеттер'''
+
+
+class Setter_django(Db_getter_setter):
+    def __init__(self, db_manager):
+        super(Setter_django, self).__init__(10, 'django_db', db_manager)
+
+    def input_in_django_db(self, result):
+        if self.interval_time <= self.expired_time:
+            if len(result) > 0:
+                for key, value in result.iteritems():
+                    query ="replace into scresults_test(var_title, value, submission_date) values(%s, %s, NOW())"
+                    self.db.cursor.execute(query, (key, value))
+                    self.db.connection.commit()
+                    print('В таблице обнавлено: Name '+str(key)+' ; Value '+str(value))
+            else:
+                print("Словарь пуст")
+
+
 '''Геттеры с других БД на будущее'''
-# class Clb_db_getter(Db_getter):
+# class Clb_db_getter(Db_getter_setter):
 #     def __init__(self, db_manager, interval):
 #         super(Clb_db_getter, self).__init__(interval, 'clb', db_manager)
 #
@@ -114,7 +144,7 @@ class Db_getter(Getters):
 #             self.expired_time = 0
 #
 #
-# class Adm_db_getter(Db_getter):
+# class Adm_db_getter(Db_getter_setter):
 #     def __init__(self, db_manager, interval):
 #         super(Adm_db_getter, self).__init__(interval, 'adm', db_manager)
 #
@@ -127,7 +157,7 @@ class Db_getter(Getters):
 '''Поиск всех id каналов для всех aliases'''
 
 
-class channels_tem_db_getter(Db_getter):
+class channels_tem_db_getter(Db_getter_setter):
     def __init__(self, db_manager):
         super(channels_tem_db_getter, self).__init__(3600, 'tem', db_manager)
         self.channels_tem_db = dict()
@@ -151,27 +181,33 @@ class channels_tem_db_getter(Db_getter):
 
 '''Поиск переменной DC1'''
 
+def getter_for_lastinteger(cursor,channel):
+    cursor.execute("select c_value from t_lastinteger where c_channel=%s" % channel)
+    data = cursor.fetchall()
+    for x in data:
+        res = x['c_value']
+    return res
 
-class DC1_tem_db_getter(Db_getter):
+
+
+class DC1_tem_db_getter(Db_getter_setter):
     def __init__(self, db_manager):
         super(DC1_tem_db_getter, self).__init__(5, 'tem', db_manager)
 
-    def getter(self, channel):
+    def getter(self, channel, res_dict):
         if self.interval_time <= self.expired_time:
-            self.db.cursor.execute("select c_value from t_lastinteger where c_channel=%s" % channel)
-            data = self.db.cursor.fetchall()
-            for res in data:
-                DC1 = res['c_value']
-            print("Got DC1")
-            self.expired_time = 0
-            return DC1
-        else:
-            pass
+            try:
+                res_dict['DC1'] = getter_for_lastinteger(self.db.cursor,channel)
+                print("Got DC1")
+                self.expired_time = 0
+            except:
+                print('Attempt to get DC1 failed')
 
 
-'''Создаем подключение к БД DJNAGO для сеттеров'''
-djangodb_connection = create_connection_djangodb()
-djangodb_cursor = djangodb_connection.cursor()
+
+# '''Создаем подключение к БД DJNAGO для сеттеров'''
+# djangodb_connection = create_connection_djangodb()
+# djangodb_cursor = djangodb_connection.cursor()
 '''Словарь alias для temdbase'''
 alias_for_tem_db = {'LOCK': '/VEPP2K/STATUS/SND_INTERLOCK', 'FLT': '/SND/SCALERS/INTEGRALS/FLT',
                     'FLTinc': '/SND/SCALERS/INCREMENTS/FLT', 'ST': '/SND/SCALERS/INTEGRALS/ST', 'E_laser': '/EMS/E',
@@ -199,6 +235,7 @@ alias_for_tem_db = {'LOCK': '/VEPP2K/STATUS/SND_INTERLOCK', 'FLT': '/SND/SCALERS
                     'GENC': '/SND/SCALERS/INTEGRALS/GENC',
                     'GENCinc': '/SND/SCALERS/INCREMENTS/GENC'}  # Создали словарь alias для путей (parent)
 manager_of_db = Manager()  # создали менеджера db
+setter_django = Setter_django(manager_of_db)    # Создали сеттер
 tem_ch = channels_tem_db_getter(manager_of_db)
 tem_ch.getter(alias_for_tem_db)  # метод для поиска всех id для temdbase
 results = dict()  # словарь для результатов (далее с его помощью будем заполнять БД django)
@@ -213,15 +250,16 @@ while True:
     current_time = time.time()
     # clbdb.cld_db_print()
     # admdb.adm_db_print()
-    results['dc1'] = DC1_getter.getter(tem_ch.get_channels_tem_db()['DC1'])
+    DC1_getter.getter(tem_ch.get_channels_tem_db()['DC1'], results)
+    setter_django.input_in_django_db(results)
     time.sleep(5 - ((time.time() - current_time) % 60.0))
-    print(results)
     lead_time = time.time() - current_time
     DC1_getter.update_time(lead_time)
+    setter_django.update_time(lead_time)
     # clbdb.update_time(lead_time)
     # admdb.update_time(lead_time)
 
-close_cursor_connection(djangodb_cursor, djangodb_connection)
+# close_cursor_connection(djangodb_cursor, djangodb_connection)
 # clbdb.db_close_connection()
 # admdb.db_close_connection()
 print("everything is working!")

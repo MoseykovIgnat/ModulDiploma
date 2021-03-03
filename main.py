@@ -44,19 +44,11 @@ def close_cursor_connection(cursor, connection):
     print("Connection was closed")
 
 
-def getter_for_lastinteger_lastdouble(cursor, channel):
-    if channel.channel_type == 0:
-        cursor.execute("select c_value from t_lastinteger where c_channel=%s" % channel.channel_id)
-    if channel.channel_type == 1:
-        cursor.execute("select c_value from t_lastdouble where c_channel=%s" % channel.channel_id)
-    data = cursor.fetchall()
-    for x in data:
-        res = x['c_value']
-    return res
-
-
-def getter_for_lastdouble(cursor,channel):
-    cursor.execute("select c_value from t_lastdouble where c_channel=%s" % channel)
+def getter_for_lastinteger_lastdouble(cursor, channel_id, channel_type):
+    if channel_type == 0:
+        cursor.execute("select c_value from t_lastinteger where c_channel=%s" % channel_id)
+    if channel_type == 1:
+        cursor.execute("select c_value from t_lastdouble where c_channel=%s" % channel_id)
     data = cursor.fetchall()
     for x in data:
         res = x['c_value']
@@ -81,17 +73,11 @@ class Manager(object):
     def get_db_con(self, name):
         if name not in self.data:
             try:
-                if name != 'django_db':
-                    config = SQLParser.xxxdbrc.config(name)
-                    connection = create_connect_to_db(config)
-                    cursor = connection.cursor(MySQLdb.cursors.DictCursor)
-                    self.data[name] = Connection_db(name, config, connection, cursor)
-                    return self.data[name]
-                if name == 'django_db':
-                    connection_django = create_connection_djangodb()
-                    cursor_django = connection_django.cursor(MySQLdb.cursors.DictCursor)
-                    self.data[name] = Connection_db(name, 0, connection_django, cursor_django)
-                    return self.data[name]
+                config = SQLParser.xxxdbrc.config(name)
+                connection = create_connect_to_db(config)
+                cursor = connection.cursor(MySQLdb.cursors.DictCursor)
+                self.data[name] = Connection_db(name, config, connection, cursor)
+                return self.data[name]
             except:
                 print("I can't connect to db: " + name)
         else:
@@ -101,14 +87,9 @@ class Manager(object):
         for c in self.data.values():
             if not c.connection:
                 try:
-                    if c.name != 'django_db':
-                        c.config = SQLParser.xxxdbrc.config(c.name)
-                        c.connection = create_connect_to_db(c.config)
-                        c.cursor = c.connection.cursor(MySQLdb.cursors.DictCursor)
-                    else:
-                        c.connection = create_connection_djangodb()
-                        c.cursor = c.connection.cursor(MySQLdb.cursors.DictCursor)
-                        print("Reconnected to django db")
+                    c.config = SQLParser.xxxdbrc.config(c.name)
+                    c.connection = create_connect_to_db(c.config)
+                    c.cursor = c.connection.cursor(MySQLdb.cursors.DictCursor)
                 except:
                     print("I can't connect to db" + c.name)
 
@@ -138,7 +119,7 @@ class Db_getter_setter(Getter_setter):
 
 class Setter_django(Db_getter_setter):
     def __init__(self, db_manager):
-        super(Setter_django, self).__init__(5, 'django_db', db_manager)
+        super(Setter_django, self).__init__(5, 'sc', db_manager)
 
     def input_in_django_db(self, result):
         if self.interval_time <= self.expired_time:
@@ -151,29 +132,7 @@ class Setter_django(Db_getter_setter):
             else:
                 print("Словарь пуст")
 
-
-'''Геттеры с других БД на будущее'''
-# class Clb_db_getter(Db_getter_setter):
-#     def __init__(self, db_manager, interval):
-#         super(Clb_db_getter, self).__init__(interval, 'clb', db_manager)
-#
-#     def cld_db_print(self):
-#         if self.interval_time <= self.expired_time:
-#             print("Cld_worked (it's working every 10 sec)")
-#             self.expired_time = 0
-#
-#
-# class Adm_db_getter(Db_getter_setter):
-#     def __init__(self, db_manager, interval):
-#         super(Adm_db_getter, self).__init__(interval, 'adm', db_manager)
-#
-#     def adm_db_print(self):
-#         if self.interval_time <= self.expired_time:
-#             print("adm_worked (it's working every 5 sec)")
-#             self.expired_time = 0
-
-
-'''Поиск всех id каналов для всех aliases'''
+'''Поиск всех id каналов для всех Path из sc_paths with Online status'''
 
 
 class Channel_id_and_type(object):
@@ -182,96 +141,148 @@ class Channel_id_and_type(object):
         self.channel_type = channel_type
 
 
-class Channels_tem_db_getter(Db_getter_setter):
-    def __init__(self, db_manager):
-        super(Channels_tem_db_getter, self).__init__(3600, 'tem', db_manager)
-        self.channels_tem_db = dict()
-
-    def get_channels_tem_db(self):
-        return self.channels_tem_db
-
-    def getter(self, alias):
-        res = dict()
-        query = "select * from v_dir where parent=%s and name = %s"
-        for key, value in alias.iteritems():
-            a = value[::-1]
-            a = a.split('/', 1)[-1]
-            args = (a[::-1], value.split('/')[-1])
-            self.db.cursor.execute(query, args)
-            data = self.db.cursor.fetchall()
-            for a in data:
-                res[key] = Channel_id_and_type(a['id'], a['type'])
-        self.channels_tem_db = res
+def get_path_parent_tem(path):
+    return path[::-1].split('/', 1)[-1][::-1]
 
 
-'''Поиск переменной DC1'''
+def get_path_name_tem(path):
+    return path.split('/')[-1]
+
+# class Channels_tem_db_getter(Db_getter_setter):
+#     def __init__(self, db_manager):
+#         super(Channels_tem_db_getter, self).__init__(3600, 'tem', db_manager)
+#         self.channels_tem_db = dict()
+#
+#     def get_channels_tem_db(self):
+#         return self.channels_tem_db
+#
+#     def getter(self, alias): #
+#         res = dict()
+#         query_for_channels = "select * from v_dir where parent=%s and name = %s"
+#         for key, value in alias.iteritems():
+#             a = value[::-1]
+#             a = a.split('/', 1)[-1]
+#             args = (a[::-1], value.split('/')[-1])
+#             self.db.cursor.execute(query_for_channels, args)
+#             data = self.db.cursor.fetchall()
+#             for a in data:
+#                 res[key] = Channel_id_and_type(a['id'], a['type'])
+#         self.channels_tem_db = res
+# class DC1_tem_db_getter(Db_getter_setter):
+#     def __init__(self, db_manager):
+#         super(DC1_tem_db_getter, self).__init__(5, 'tem', db_manager)
+#
+#     def getter(self, channel_type, res_dict):
+#         if self.interval_time <= self.expired_time:
+#             try:
+#                 res_dict['DC1'] = getter_for_lastinteger_lastdouble(self.db.cursor, channel_type)
+#                 print("Got DC1")
+#                 self.expired_time = 0
+#             except:
+#                 print('Attempt to get DC1 failed')
+# class DC1inc_tem_db_getter(Db_getter_setter):
+#     def __init__(self, db_manager):
+#         super(DC1inc_tem_db_getter, self).__init__(10, 'tem', db_manager)
+#
+#     def getter(self, channel_type, res_dict):
+#         if self.interval_time <= self.expired_time:
+#             try:
+#                 res_dict['DC1inc'] = getter_for_lastinteger_lastdouble(self.db.cursor, channel_type)
+#                 print("Got DC1inc")
+#                 self.expired_time = 0
+#             except:
+#                 print('Attempt to get DC1inc failed')
+# '''Словарь alias для temdbase'''
+# alias_for_tem_db = {'LOCK': '/VEPP2K/STATUS/SND_INTERLOCK', 'FLT': '/SND/SCALERS/INTEGRALS/FLT',
+#                     'FLTinc': '/SND/SCALERS/INCREMENTS/FLT', 'ST': '/SND/SCALERS/INTEGRALS/ST', 'E_laser': '/EMS/E',
+#                     'dE_laser': '/EMS/DE', 'BEP_PMT': '/VEPP2K/STATUS/BEP_PMT', 'STinc': '/SND/SCALERS/INCREMENTS/ST',
+#                     'shunt': '/VEPP2K/STATUS/VEPP_POWER_CURRENT', 'E_VEPP': '/VEPP2K/STATUS/VEPP_ENERGY',
+#                     'E_NMR': '/VEPP2K/STATUS/E_NMR', 'L': '/SND/DERIVED/L', 'IL': '/SND/DERIVED/IL',
+#                     'IProd': '/SND/DERIVED/IProd', 'DC1': '/SND/SCALERS/INTEGRALS/DC1',
+#                     'DC1inc': '/SND/SCALERS/INCREMENTS/DC1', 'time': '/SND/SCALERS/INTEGRALS/TIME',
+#                     'Tlive': '/SND/SCALERS/INTEGRALS/TIMELIVE', 'Tliveinc': '/SND/SCALERS/INCREMENTS/TIMELIVE',
+#                     'E_PMT': '/VEPP2K/STATUS/VEPP_IE', 'P_PMT': '/VEPP2K/STATUS/VEPP_IP',
+#                     'VEPP_FZ': '/VEPP2K/STATUS/VEPP_FZ', 'run': '/SND/SCALERS/RUN',
+#                     'timeinc': '/SND/SCALERS/INCREMENTS/TIME', 'FLT1': '/SND/SCALERS/INTEGRALS/FLT1',
+#                     'FLT1inc': '/SND/SCALERS/INCREMENTS/FLT1', 'etau': '/VEPP2K/STATUS/VEPP_E_TAU',
+#                     'ptau': '/VEPP2K/STATUS/VEPP_P_TAU', 'fztau': '/VEPP2K/STATUS/VEPP_FZ_TAU',
+#                     'ePMT': '/VEPP2K/CAS/VEPP/CURRENTS/EPMT', 'pPMT': '/VEPP2K/CAS/VEPP/CURRENTS/PPMT',
+#                     'E0': '/VEPP2K/STATUS/VEPP_E0', 'setE': '/VEPP2K/STATUS/VEPP_SET_ENERGY',
+#                     'ILSH': '/SND/DERIVED/ILSH', 'ILPT': '/SND/DERIVED/ILPT', 'k': '/SND/DERIVED/PWRFLT1',
+#                     'sigma0': '/SND/DERIVED/SIGMAFLT1', 'fcosm': '/SND/DERIVED/CSMFLT1',
+#                     'RMNAFLT': '/SND/DERIVED/RMNAFLT', 'E_EMS_DT': '/EMS/DT', 'Tklk': '/SND/CPS/KAS/1/007',
+#                     'NMR_1M1': '/VEPP2K/STATUS/NMR_1M1', 'NMR_1M2': '/VEPP2K/STATUS/NMR_1M2',
+#                     'NMR_2M1': '/VEPP2K/STATUS/NMR_2M1', 'NMR_2M2': '/VEPP2K/STATUS/NMR_2M2',
+#                     'NMR_3M1': '/VEPP2K/STATUS/NMR_3M1', 'NMR_3M2': '/VEPP2K/STATUS/NMR_3M2',
+#                     'NMR_4M1': '/VEPP2K/STATUS/NMR_4M1', 'NMR_4M2': '/VEPP2K/STATUS/NMR_4M2',
+#                     'NMR_AVG': '/VEPP2K/STATUS/NMR_AVG', 'VEPP_RF_FREQ': '/VEPP2K/CAS/VEPP/RF/FREQ',
+#                     'GENC': '/SND/SCALERS/INTEGRALS/GENC',
+#                     'GENCinc': '/SND/SCALERS/INCREMENTS/GENC'}  # Создали словарь alias для путей (parent)
 
 
-class DC1_tem_db_getter(Db_getter_setter):
-    def __init__(self, db_manager):
-        super(DC1_tem_db_getter, self).__init__(5, 'tem', db_manager)
+class Tem_db_getter(Db_getter_setter):
+    def __init__(self, time_interval, db_manager, path):
+        super(Tem_db_getter, self).__init__(time_interval, 'tem', db_manager)
+        self.path = path
 
-    def getter(self, channel_type, res_dict):
+    def getter(self, res_dict):
         if self.interval_time <= self.expired_time:
             try:
-                res_dict['DC1'] = getter_for_lastinteger_lastdouble(self.db.cursor, channel_type)
-                print("Got DC1")
-                self.expired_time = 0
+                query_for_channel = "select * from v_dir where parent=%s and name = %s"
+                args_for_channel = (get_path_parent_tem(self.path), get_path_name_tem(self.path))
+                self.db.cursor.execute(query_for_channel, args_for_channel)
+                data = self.db.cursor.fetchone()
+                res_dict[self.path] = getter_for_lastinteger_lastdouble(self.db.cursor, data['id'], data['type'])
+                print("Get " + get_path_name_tem(self.path))
             except:
-                print('Attempt to get DC1 failed')
+                print('Attempt to get variable failed')
 
 
+#Функция для создания массива гетеров!
+def create_getters_for_tem(django_db_connection, getter_list, db_manager):
+    django_db_connection.db.cursor.execute('SELECT s1.path,s1.interval_time FROM sc_paths_online s1 LEFT JOIN sc_paths_online s2 ON s1.path = s2.path AND s2.interval_time < s1.interval_time WHERE s2.path_id IS NULL')
+    data = django_db_connection.db.cursor.fetchall()
+    for a in data:
+        getter_list.append(Tem_db_getter(a['interval_time'], db_manager, a['path']))
+        print(a['path'])
+    print('Все нужные гетеры созданы')
 
-# '''Создаем подключение к БД DJNAGO для сеттеров'''
-# djangodb_connection = create_connection_djangodb()
-# djangodb_cursor = djangodb_connection.cursor()
-'''Словарь alias для temdbase'''
-alias_for_tem_db = {'LOCK': '/VEPP2K/STATUS/SND_INTERLOCK', 'FLT': '/SND/SCALERS/INTEGRALS/FLT',
-                    'FLTinc': '/SND/SCALERS/INCREMENTS/FLT', 'ST': '/SND/SCALERS/INTEGRALS/ST', 'E_laser': '/EMS/E',
-                    'dE_laser': '/EMS/DE', 'BEP_PMT': '/VEPP2K/STATUS/BEP_PMT', 'STinc': '/SND/SCALERS/INCREMENTS/ST',
-                    'shunt': '/VEPP2K/STATUS/VEPP_POWER_CURRENT', 'E_VEPP': '/VEPP2K/STATUS/VEPP_ENERGY',
-                    'E_NMR': '/VEPP2K/STATUS/E_NMR', 'L': '/SND/DERIVED/L', 'IL': '/SND/DERIVED/IL',
-                    'IProd': '/SND/DERIVED/IProd', 'DC1': '/SND/SCALERS/INTEGRALS/DC1',
-                    'DC1inc': '/SND/SCALERS/INCREMENTS/DC1', 'time': '/SND/SCALERS/INTEGRALS/TIME',
-                    'Tlive': '/SND/SCALERS/INTEGRALS/TIMELIVE', 'Tliveinc': '/SND/SCALERS/INCREMENTS/TIMELIVE',
-                    'E_PMT': '/VEPP2K/STATUS/VEPP_IE', 'P_PMT': '/VEPP2K/STATUS/VEPP_IP',
-                    'VEPP_FZ': '/VEPP2K/STATUS/VEPP_FZ', 'run': '/SND/SCALERS/RUN',
-                    'timeinc': '/SND/SCALERS/INCREMENTS/TIME', 'FLT1': '/SND/SCALERS/INTEGRALS/FLT1',
-                    'FLT1inc': '/SND/SCALERS/INCREMENTS/FLT1', 'etau': '/VEPP2K/STATUS/VEPP_E_TAU',
-                    'ptau': '/VEPP2K/STATUS/VEPP_P_TAU', 'fztau': '/VEPP2K/STATUS/VEPP_FZ_TAU',
-                    'ePMT': '/VEPP2K/CAS/VEPP/CURRENTS/EPMT', 'pPMT': '/VEPP2K/CAS/VEPP/CURRENTS/PPMT',
-                    'E0': '/VEPP2K/STATUS/VEPP_E0', 'setE': '/VEPP2K/STATUS/VEPP_SET_ENERGY',
-                    'ILSH': '/SND/DERIVED/ILSH', 'ILPT': '/SND/DERIVED/ILPT', 'k': '/SND/DERIVED/PWRFLT1',
-                    'sigma0': '/SND/DERIVED/SIGMAFLT1', 'fcosm': '/SND/DERIVED/CSMFLT1',
-                    'RMNAFLT': '/SND/DERIVED/RMNAFLT', 'E_EMS_DT': '/EMS/DT', 'Tklk': '/SND/CPS/KAS/1/007',
-                    'NMR_1M1': '/VEPP2K/STATUS/NMR_1M1', 'NMR_1M2': '/VEPP2K/STATUS/NMR_1M2',
-                    'NMR_2M1': '/VEPP2K/STATUS/NMR_2M1', 'NMR_2M2': '/VEPP2K/STATUS/NMR_2M2',
-                    'NMR_3M1': '/VEPP2K/STATUS/NMR_3M1', 'NMR_3M2': '/VEPP2K/STATUS/NMR_3M2',
-                    'NMR_4M1': '/VEPP2K/STATUS/NMR_4M1', 'NMR_4M2': '/VEPP2K/STATUS/NMR_4M2',
-                    'NMR_AVG': '/VEPP2K/STATUS/NMR_AVG', 'VEPP_RF_FREQ': '/VEPP2K/CAS/VEPP/RF/FREQ',
-                    'GENC': '/SND/SCALERS/INTEGRALS/GENC',
-                    'GENCinc': '/SND/SCALERS/INCREMENTS/GENC'}  # Создали словарь alias для путей (parent)
+
+def execute_getters_for_tem(res_dict, getters):
+    for tem_getter in getters:
+        tem_getter.getter(res_dict)
+
+
+def update_getters_time_for_tem(getters, update_time):
+    for tem_getter in getters:
+        tem_getter.update_time(update_time)
+
+
 manager_of_db = Manager()  # создали менеджера db
 setter_django = Setter_django(manager_of_db)    # Создали сеттер
-tem_ch = Channels_tem_db_getter(manager_of_db)
-tem_ch.getter(alias_for_tem_db)  # метод для поиска всех id для temdbase
+# tem_ch = Channels_tem_db_getter(manager_of_db)
+# tem_ch.getter(alias_for_tem_db)  # метод для поиска всех id для temdbase
 results = dict()  # словарь для результатов (далее с его помощью будем заполнять БД django)
-
+tem_getters = list() # Лист для всех гетеров с tem
 # clbdb = Clb_db_getter(manager_of_db, 10)
 # admdb = Adm_db_getter(manager_of_db, 5)
 # test = test_db_getter(manager_of_db,5)
-DC1_getter = DC1_tem_db_getter(manager_of_db)
-DC1_getter2 = DC1_tem_db_getter(manager_of_db)  # Тест, что подключение только одно
+# DC1_getter = DC1_tem_db_getter(manager_of_db)
+# DC1inc_getter = DC1inc_tem_db_getter(manager_of_db)  # Тест, что подключение только одно
 
+create_getters_for_tem(setter_django, tem_getters, manager_of_db)
+time_checker = 0
 while True:
     current_time = time.time()
-    # clbdb.cld_db_print()
-    # admdb.adm_db_print()
-    DC1_getter.getter(tem_ch.get_channels_tem_db()['DC1'], results)
+    execute_getters_for_tem(results,tem_getters)
     setter_django.input_in_django_db(results)
-    time.sleep(5 - ((time.time() - current_time) % 60.0))
+    time.sleep(5 - (time.time() - current_time))
+    time_checker += 5
+    print("Прошло времени: " + str(time_checker) + 'сек')
     lead_time = time.time() - current_time
-    DC1_getter.update_time(lead_time)
+    # DC1_getter.update_time(lead_time)
+    # DC1inc_getter.update_time(lead_time)
+    update_getters_time_for_tem(tem_getters,lead_time)
     setter_django.update_time(lead_time)
     # clbdb.update_time(lead_time)
     # admdb.update_time(lead_time)

@@ -132,6 +132,7 @@ class Setter_django(Db_getter_setter):
             else:
                 print("Словарь пуст")
 
+
 '''Поиск всех id каналов для всех Path из sc_paths with Online status'''
 
 
@@ -224,6 +225,10 @@ class Tem_db_getter(Db_getter_setter):
     def __init__(self, time_interval, db_manager, path):
         super(Tem_db_getter, self).__init__(time_interval, 'tem', db_manager)
         self.path = path
+        self.is_it_new = 1
+
+    def getting_older(self):
+        self.is_it_new = 0
 
     def getter(self, res_dict):
         if self.interval_time <= self.expired_time:
@@ -233,59 +238,63 @@ class Tem_db_getter(Db_getter_setter):
                 self.db.cursor.execute(query_for_channel, args_for_channel)
                 data = self.db.cursor.fetchone()
                 res_dict[self.path] = getter_for_lastinteger_lastdouble(self.db.cursor, data['id'], data['type'])
-                print("Get " + get_path_name_tem(self.path))
+                print("Get " + self.path)
             except:
                 print('Attempt to get variable failed')
 
 
 #Функция для создания массива гетеров!
-def create_getters_for_tem(django_db_connection, getter_list, db_manager):
+def create_getters_for_tem(django_db_connection, getter_dict, db_manager):
     django_db_connection.db.cursor.execute('SELECT s1.path,s1.interval_time FROM sc_paths_online s1 LEFT JOIN sc_paths_online s2 ON s1.path = s2.path AND s2.interval_time < s1.interval_time WHERE s2.path_id IS NULL')
     data = django_db_connection.db.cursor.fetchall()
     for a in data:
-        getter_list.append(Tem_db_getter(a['interval_time'], db_manager, a['path']))
-        print(a['path'])
-    print('Все нужные гетеры созданы')
+        if a['path'] in getter_dict:
+            print('Геттер с path: ' + str(a['path']) + ' уже существует, создавать новый не нужно')
+            getter_dict[a['path']].is_it_new = 1
+        else:
+            getter_dict[a['path']] = (Tem_db_getter(a['interval_time'], db_manager, a['path']))
+            print('Создан новый гетер. Его path: '+str(a['path']))
+
 
 
 def execute_getters_for_tem(res_dict, getters):
-    for tem_getter in getters:
-        tem_getter.getter(res_dict)
+    for key, value in getters.iteritems():
+        value.getter(res_dict)
 
 
 def update_getters_time_for_tem(getters, update_time):
-    for tem_getter in getters:
-        tem_getter.update_time(update_time)
+    for key, value in getters.iteritems():
+        value.update_time(update_time)
+        value.getting_older()
+
+
+def delete_old_getters(getters):
+    for key, value in getters.iteritems():
+        if value.is_it_new == 0:
+            del getters[key]
+            print('Ненужный геттер был удален. Его путь: '+value.path)
 
 
 manager_of_db = Manager()  # создали менеджера db
 setter_django = Setter_django(manager_of_db)    # Создали сеттер
-# tem_ch = Channels_tem_db_getter(manager_of_db)
-# tem_ch.getter(alias_for_tem_db)  # метод для поиска всех id для temdbase
 results = dict()  # словарь для результатов (далее с его помощью будем заполнять БД django)
-tem_getters = list() # Лист для всех гетеров с tem
-# clbdb = Clb_db_getter(manager_of_db, 10)
-# admdb = Adm_db_getter(manager_of_db, 5)
-# test = test_db_getter(manager_of_db,5)
-# DC1_getter = DC1_tem_db_getter(manager_of_db)
-# DC1inc_getter = DC1inc_tem_db_getter(manager_of_db)  # Тест, что подключение только одно
+tem_getters = dict()    # словарь для всех гетеров с tem
 
-create_getters_for_tem(setter_django, tem_getters, manager_of_db)
+
 time_checker = 0
 while True:
     current_time = time.time()
-    execute_getters_for_tem(results,tem_getters)
+    create_getters_for_tem(setter_django, tem_getters, manager_of_db)
+    delete_old_getters(tem_getters)
+    execute_getters_for_tem(results, tem_getters)
     setter_django.input_in_django_db(results)
     time.sleep(5 - (time.time() - current_time))
     time_checker += 5
     print("Прошло времени: " + str(time_checker) + 'сек')
     lead_time = time.time() - current_time
-    # DC1_getter.update_time(lead_time)
-    # DC1inc_getter.update_time(lead_time)
     update_getters_time_for_tem(tem_getters,lead_time)
     setter_django.update_time(lead_time)
-    # clbdb.update_time(lead_time)
-    # admdb.update_time(lead_time)
+
 
 # close_cursor_connection(djangodb_cursor, djangodb_connection)
 # clbdb.db_close_connection()

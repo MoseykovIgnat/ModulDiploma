@@ -4,17 +4,9 @@
 import MySQLdb
 import SQLParser.xxxdbrc
 import time
+import re
 
-'''Возможность взять alias для temdbase from txt.file'''
-
-
-def create_alias_to_tem_db():
-    d = dict()
-    inp = open("Alias.txt", 'r')
-    for i in inp.readlines():
-        key, val = i.strip().split(' ')
-        d[key] = val
-    return d
+dict_for_min_max_type = {'sec': 'second', 'min': 'minute', 'h': 'hour', 'd': 'day', 'm': 'month', 'y': 'year'}
 
 
 def create_connect_to_db(config):
@@ -28,23 +20,29 @@ def create_connect_to_db(config):
     return connection
 
 
-def create_connection_djangodb():
-    connection = MySQLdb.connect(host='sndfarm08-00.sndonline',
-                                 user='scadmin',
-                                 passwd='sc1s1mp0rtnt',
-                                 db='sctestdb',
-                                 port=3306,
-                                 charset='utf8')
-    return connection
-
-
 def close_cursor_connection(cursor, connection):
     cursor.close()
     connection.close()
     print("Connection was closed")
 
 
-def getter_for_lastinteger_lastdouble(cursor, channel_id, channel_type):
+# ----Get different info about variable
+def get_source_of_var(var_info):
+    return var_info.split(':')[0]
+
+
+def get_path_of_var(var_info):
+    return var_info.split(':')[1]
+
+
+def get_param_of_var(var_info):
+    return var_info.split(':')[2]
+
+
+# -------------------------
+
+
+def getter_for_lastinteger_lastdouble_value(cursor, channel_id, channel_type):
     if channel_type == 0:
         cursor.execute("select c_value from t_lastinteger where c_channel=%s" % channel_id)
     if channel_type == 1:
@@ -52,7 +50,107 @@ def getter_for_lastinteger_lastdouble(cursor, channel_id, channel_type):
     data = cursor.fetchall()
     for x in data:
         res = x['c_value']
-    return res
+    return {'result': res, 'need_to_save_to_django': 1}
+
+
+def getter_for_lastinteger_lastdouble_fvalue(cursor, channel_id_value, channel_type_value, channel_id_timealive):
+    if channel_type_value == 0:
+        query = "select (select c_value from t_lastinteger where c_channel=%s)/(select c_value from t_lastdouble where c_channel=%s) as Hz"
+
+    if channel_type_value == 1:
+        query = "select (select c_value from t_lastdouble where c_channel=%s)/(select c_value from t_lastdouble where c_channel=%s) as Hz"
+    cursor.execute(query, (channel_id_value, channel_id_timealive['id']))
+    data = cursor.fetchall()
+    for x in data:
+        res = x['Hz']
+    return {'result': res, 'need_to_save_to_django': 1}
+
+
+def getter_for_lastinteger_lastdouble_stamp(cursor, channel_id, channel_type):
+    if channel_type == 0:
+        cursor.execute("select c_stamp from t_lastinteger where c_channel=%s" % channel_id)
+    if channel_type == 1:
+        cursor.execute("select c_stamp from t_lastdouble where c_channel=%s" % channel_id)
+    data = cursor.fetchall()
+    for x in data:
+        res = x['c_stamp']
+    return {'result': res, 'need_to_save_to_django': 1}
+
+
+def getter_for_integer_double_prev(cursor, channel_id, channel_type):
+    if channel_type == 0:
+        cursor.execute(
+            "select c_value from t_datainteger where c_channel=%s order by c_stamp DESC limit 1,1" % channel_id)
+    if channel_type == 1:
+        cursor.execute(
+            "select c_value from t_datadouble where c_channel=%s order by c_stamp DESC limit 1,1" % channel_id)
+    data = cursor.fetchall()
+    for x in data:
+        res = x['c_value']
+    return {'result': res, 'need_to_save_to_django': 1}
+
+
+def getter_for_integer_double_prev_stamp(cursor, channel_id, channel_type):
+    if channel_type == 0:
+        cursor.execute(
+            "select c_stamp from t_datainteger where c_channel=%s order by c_stamp DESC limit 1,1" % channel_id)
+    if channel_type == 1:
+        cursor.execute(
+            "select c_stamp from t_datadouble where c_channel=%s order by c_stamp DESC limit 1,1" % channel_id)
+    data = cursor.fetchall()
+    for x in data:
+        res = x['c_stamp']
+    return {'result': res, 'need_to_save_to_django': 1}
+
+
+def getter_for_integer_double_sample(cursor, channel_id, channel_type, sample_type):
+    # sec,min,hour,d,m,y
+    # sample_type = 'sum(-100d,-10d)' -> min=100d; max=10d; min_val=100; min_type='d',res_min = 10 days; max_val=10; max_type='d';
+    print(sample_type)
+    interval = sample_type.split('(')[1].replace(')', '').replace('-', '').split(',')
+    min_res = interval[0]
+    min_type = "".join(re.findall(r'\D', min_res))
+    min_val = min_res.replace(min_type, '')
+    max_res = interval[1]
+    max_type = "".join(re.findall(r'\D', max_res))
+    max_val = max_res.replace(max_type, '')
+    sample_type_name = sample_type.split('(')[0]
+    sql = 'select c_value from table_name where c_channel=%s and c_stamp > round(unix_timestamp(date_sub(now(),interval min_val min_type))*1000000) and c_stamp < round(unix_timestamp(date_sub(now(),interval max_val max_type))*1000000)'
+    sql = sql.replace('min_val', min_val).replace('min_type', dict_for_min_max_type[min_type]).replace('max_val',
+                                                                                                       max_val).replace(
+        'max_type', dict_for_min_max_type[max_type])
+    if channel_type == 0:
+        sql = sql.replace('table_name', 't_datainteger')
+    if channel_type == 1:
+        sql = sql.replace('table_name', 't_datadouble')
+    cursor.execute(sql, channel_id)
+    data = cursor.fetchall()
+    if not data:
+        return {'result': 'Empty', 'need_to_save_to_django': 1}
+    if sample_type_name == 'avg':
+        counter = 0
+        res = 0
+        for x in data:
+            res = res + float(x['c_value'])
+            counter = counter + 1
+        return {'result': res / counter, 'need_to_save_to_django': 1}
+    if sample_type_name == 'min':
+        res_min = float(data[0]['c_value'])
+        for x in data:
+            if res_min > float(x['c_value']):
+                res_min = float(x['c_value'])
+        return {'result': res_min, 'need_to_save_to_django': 1}
+    if sample_type_name == 'max':
+        res_max = float(data[0]['c_value'])
+        for x in data:
+            if res_max < float(x['c_value']):
+                res_max = float(x['c_value'])
+        return {'result': res_max, 'need_to_save_to_django': 1}
+    if sample_type_name == 'sum':
+        res = 0
+        for x in data:
+            res = res + float(x['c_value'])
+        return {'result': res, 'need_to_save_to_django': 1}
 
 
 class Connection_db(object):
@@ -125,12 +223,27 @@ class Setter_django(Db_getter_setter):
         if self.interval_time <= self.expired_time:
             if len(result) > 0:
                 for key, value in result.iteritems():
-                    query ="replace into scresults_test(var_title, value, submission_date) values(%s, %s, NOW())"
-                    self.db.cursor.execute(query, (key, value))
-                    self.db.connection.commit()
-                    print('В таблице обнавлено: Name '+str(key)+' ; Value '+str(value))
+                    if value['need_to_save_to_django'] == 1:
+                        query = "replace into scresults_test(var_title, value, submission_date) values(%s, %s, NOW())"
+                        query_with_empty_res = "replace into scresults_test(var_title, comment, value, submission_date) values(%s, %s, 0, NOW())"
+                        if value['result'] == 'Empty':
+                            self.db.cursor.execute(query_with_empty_res, (key, value['result']))
+                        else:
+                            self.db.cursor.execute(query, (key, value['result']))
+                        self.db.connection.commit()
+                        print('В таблице обнавлено: Name: ' + str(key) + ' ; Value:' + str(value['result']))
+                        value['need_to_save_to_django'] = 0
             else:
-                print("Словарь пуст")
+                print("Нет новых параметров для сохранения")
+
+    def delete_overdue_data(self):
+        delete_overdue_data_time = self.interval_time * 2
+        if delete_overdue_data_time <= self.expired_time:
+            self.db.cursor.execute(
+                'delete from scresults_test where var_title not in (select p.path from sc_paths_online p)')
+            self.db.connection.commit()
+            self.expired_time = 0
+            print('Overdue data was deleted!')
 
 
 '''Поиск всех id каналов для всех Path из sc_paths with Online status'''
@@ -149,103 +262,60 @@ def get_path_parent_tem(path):
 def get_path_name_tem(path):
     return path.split('/')[-1]
 
-# class Channels_tem_db_getter(Db_getter_setter):
-#     def __init__(self, db_manager):
-#         super(Channels_tem_db_getter, self).__init__(3600, 'tem', db_manager)
-#         self.channels_tem_db = dict()
-#
-#     def get_channels_tem_db(self):
-#         return self.channels_tem_db
-#
-#     def getter(self, alias): #
-#         res = dict()
-#         query_for_channels = "select * from v_dir where parent=%s and name = %s"
-#         for key, value in alias.iteritems():
-#             a = value[::-1]
-#             a = a.split('/', 1)[-1]
-#             args = (a[::-1], value.split('/')[-1])
-#             self.db.cursor.execute(query_for_channels, args)
-#             data = self.db.cursor.fetchall()
-#             for a in data:
-#                 res[key] = Channel_id_and_type(a['id'], a['type'])
-#         self.channels_tem_db = res
-# class DC1_tem_db_getter(Db_getter_setter):
-#     def __init__(self, db_manager):
-#         super(DC1_tem_db_getter, self).__init__(5, 'tem', db_manager)
-#
-#     def getter(self, channel_type, res_dict):
-#         if self.interval_time <= self.expired_time:
-#             try:
-#                 res_dict['DC1'] = getter_for_lastinteger_lastdouble(self.db.cursor, channel_type)
-#                 print("Got DC1")
-#                 self.expired_time = 0
-#             except:
-#                 print('Attempt to get DC1 failed')
-# class DC1inc_tem_db_getter(Db_getter_setter):
-#     def __init__(self, db_manager):
-#         super(DC1inc_tem_db_getter, self).__init__(10, 'tem', db_manager)
-#
-#     def getter(self, channel_type, res_dict):
-#         if self.interval_time <= self.expired_time:
-#             try:
-#                 res_dict['DC1inc'] = getter_for_lastinteger_lastdouble(self.db.cursor, channel_type)
-#                 print("Got DC1inc")
-#                 self.expired_time = 0
-#             except:
-#                 print('Attempt to get DC1inc failed')
-# '''Словарь alias для temdbase'''
-# alias_for_tem_db = {'LOCK': '/VEPP2K/STATUS/SND_INTERLOCK', 'FLT': '/SND/SCALERS/INTEGRALS/FLT',
-#                     'FLTinc': '/SND/SCALERS/INCREMENTS/FLT', 'ST': '/SND/SCALERS/INTEGRALS/ST', 'E_laser': '/EMS/E',
-#                     'dE_laser': '/EMS/DE', 'BEP_PMT': '/VEPP2K/STATUS/BEP_PMT', 'STinc': '/SND/SCALERS/INCREMENTS/ST',
-#                     'shunt': '/VEPP2K/STATUS/VEPP_POWER_CURRENT', 'E_VEPP': '/VEPP2K/STATUS/VEPP_ENERGY',
-#                     'E_NMR': '/VEPP2K/STATUS/E_NMR', 'L': '/SND/DERIVED/L', 'IL': '/SND/DERIVED/IL',
-#                     'IProd': '/SND/DERIVED/IProd', 'DC1': '/SND/SCALERS/INTEGRALS/DC1',
-#                     'DC1inc': '/SND/SCALERS/INCREMENTS/DC1', 'time': '/SND/SCALERS/INTEGRALS/TIME',
-#                     'Tlive': '/SND/SCALERS/INTEGRALS/TIMELIVE', 'Tliveinc': '/SND/SCALERS/INCREMENTS/TIMELIVE',
-#                     'E_PMT': '/VEPP2K/STATUS/VEPP_IE', 'P_PMT': '/VEPP2K/STATUS/VEPP_IP',
-#                     'VEPP_FZ': '/VEPP2K/STATUS/VEPP_FZ', 'run': '/SND/SCALERS/RUN',
-#                     'timeinc': '/SND/SCALERS/INCREMENTS/TIME', 'FLT1': '/SND/SCALERS/INTEGRALS/FLT1',
-#                     'FLT1inc': '/SND/SCALERS/INCREMENTS/FLT1', 'etau': '/VEPP2K/STATUS/VEPP_E_TAU',
-#                     'ptau': '/VEPP2K/STATUS/VEPP_P_TAU', 'fztau': '/VEPP2K/STATUS/VEPP_FZ_TAU',
-#                     'ePMT': '/VEPP2K/CAS/VEPP/CURRENTS/EPMT', 'pPMT': '/VEPP2K/CAS/VEPP/CURRENTS/PPMT',
-#                     'E0': '/VEPP2K/STATUS/VEPP_E0', 'setE': '/VEPP2K/STATUS/VEPP_SET_ENERGY',
-#                     'ILSH': '/SND/DERIVED/ILSH', 'ILPT': '/SND/DERIVED/ILPT', 'k': '/SND/DERIVED/PWRFLT1',
-#                     'sigma0': '/SND/DERIVED/SIGMAFLT1', 'fcosm': '/SND/DERIVED/CSMFLT1',
-#                     'RMNAFLT': '/SND/DERIVED/RMNAFLT', 'E_EMS_DT': '/EMS/DT', 'Tklk': '/SND/CPS/KAS/1/007',
-#                     'NMR_1M1': '/VEPP2K/STATUS/NMR_1M1', 'NMR_1M2': '/VEPP2K/STATUS/NMR_1M2',
-#                     'NMR_2M1': '/VEPP2K/STATUS/NMR_2M1', 'NMR_2M2': '/VEPP2K/STATUS/NMR_2M2',
-#                     'NMR_3M1': '/VEPP2K/STATUS/NMR_3M1', 'NMR_3M2': '/VEPP2K/STATUS/NMR_3M2',
-#                     'NMR_4M1': '/VEPP2K/STATUS/NMR_4M1', 'NMR_4M2': '/VEPP2K/STATUS/NMR_4M2',
-#                     'NMR_AVG': '/VEPP2K/STATUS/NMR_AVG', 'VEPP_RF_FREQ': '/VEPP2K/CAS/VEPP/RF/FREQ',
-#                     'GENC': '/SND/SCALERS/INTEGRALS/GENC',
-#                     'GENCinc': '/SND/SCALERS/INCREMENTS/GENC'}  # Создали словарь alias для путей (parent)
-
 
 class Tem_db_getter(Db_getter_setter):
     def __init__(self, time_interval, db_manager, path):
-        super(Tem_db_getter, self).__init__(time_interval, 'tem', db_manager)
-        self.path = path
+        super(Tem_db_getter, self).__init__(5, get_source_of_var(path), db_manager)
+        self.variable_info = path
+        self.path = get_path_of_var(path)
         self.is_it_new = 1
+        self.param = get_param_of_var(path)
 
     def getting_older(self):
         self.is_it_new = 0
 
     def getter(self, res_dict):
         if self.interval_time <= self.expired_time:
-            try:
-                query_for_channel = "select * from v_dir where parent=%s and name = %s"
-                args_for_channel = (get_path_parent_tem(self.path), get_path_name_tem(self.path))
-                self.db.cursor.execute(query_for_channel, args_for_channel)
-                data = self.db.cursor.fetchone()
-                res_dict[self.path] = getter_for_lastinteger_lastdouble(self.db.cursor, data['id'], data['type'])
-                print("Get " + self.path)
-            except:
-                print('Attempt to get variable failed')
+            query_for_channel = "select * from v_dir where parent=%s and name = %s"
+            args_for_channel = (get_path_parent_tem(self.path), get_path_name_tem(self.path))
+            self.db.cursor.execute(query_for_channel, args_for_channel)
+            data = self.db.cursor.fetchone()
+            if self.param == 'value':
+                res_dict[self.variable_info] = getter_for_lastinteger_lastdouble_value(self.db.cursor, data['id'],
+                                                                                       data['type'])
+                print("Got variable value. Path: " + self.path)
+            if self.param == 'fvalue':
+                self.db.cursor.execute(
+                    "select id from v_dir where parent='/snd/scalers/increments' and name = 'timelive'")
+                timelive_channel = self.db.cursor.fetchone()
+                res_dict[self.variable_info] = getter_for_lastinteger_lastdouble_fvalue(self.db.cursor, data['id'],
+                                                                                        data['type'], timelive_channel)
+                print("Got variable value. Path: " + self.path)
+            if self.param == 'stamp':
+                res_dict[self.variable_info] = getter_for_lastinteger_lastdouble_stamp(self.db.cursor, data['id'],
+                                                                                       data['type'])
+                print("Got variable stamp. Path: " + self.path)
+            if self.param == 'prev':
+                res_dict[self.variable_info] = getter_for_integer_double_prev(self.db.cursor, data['id'],
+                                                                              data['type'])
+                print("Got variable prev. Path: " + self.path)
+            if self.param == 'prev_stamp':
+                res_dict[self.variable_info] = getter_for_integer_double_prev_stamp(self.db.cursor, data['id'],
+                                                                                    data['type'])
+                print("Got variable prev_stamp. Path: " + self.path)
+            self.expired_time = 0
+            if 'sum' in self.param or 'min' in self.param or 'max' in self.param or 'avg' in self.param:
+                res_dict[self.variable_info] = getter_for_integer_double_sample(self.db.cursor, data['id'],
+                                                                                data['type'], self.param)
+                print("Got variable smth sample. Path: " + self.path)
 
 
-#Функция для создания массива гетеров!
+# Функция для создания массива гетеров!
+
+
 def create_getters_for_tem(django_db_connection, getter_dict, db_manager):
-    django_db_connection.db.cursor.execute('SELECT s1.path,s1.interval_time FROM sc_paths_online s1 LEFT JOIN sc_paths_online s2 ON s1.path = s2.path AND s2.interval_time < s1.interval_time WHERE s2.path_id IS NULL')
+    django_db_connection.db.cursor.execute(
+        'SELECT s1.path,s1.interval_time FROM sc_paths_online s1 LEFT JOIN sc_paths_online s2 ON s1.path = s2.path AND s2.interval_time < s1.interval_time WHERE s2.path_id IS NULL')
     data = django_db_connection.db.cursor.fetchall()
     for a in data:
         if a['path'] in getter_dict:
@@ -253,8 +323,9 @@ def create_getters_for_tem(django_db_connection, getter_dict, db_manager):
             getter_dict[a['path']].is_it_new = 1
         else:
             getter_dict[a['path']] = (Tem_db_getter(a['interval_time'], db_manager, a['path']))
-            print('Создан новый гетер. Его path: '+str(a['path']))
-
+            print('Создан новый гетер. Его path: ' + str(
+                a['path']) + '. Его интервал обновления: ' + str(
+                a['interval_time']) + ' секунд.')
 
 
 def execute_getters_for_tem(res_dict, getters):
@@ -269,32 +340,30 @@ def update_getters_time_for_tem(getters, update_time):
 
 
 def delete_old_getters(getters):
-    for key, value in getters.iteritems():
-        if value.is_it_new == 0:
-            del getters[key]
-            print('Ненужный геттер был удален. Его путь: '+value.path)
+    new_getters = dict((key, value) for key, value in getters.iteritems() if value.is_it_new != 0)
+    return new_getters
 
 
 manager_of_db = Manager()  # создали менеджера db
-setter_django = Setter_django(manager_of_db)    # Создали сеттер
+setter_django = Setter_django(manager_of_db)  # Создали сеттер
 results = dict()  # словарь для результатов (далее с его помощью будем заполнять БД django)
-tem_getters = dict()    # словарь для всех гетеров с tem
-
-
+tem_getters = dict()  # словарь для всех гетеров с tem
 time_checker = 0
+
 while True:
     current_time = time.time()
     create_getters_for_tem(setter_django, tem_getters, manager_of_db)
-    delete_old_getters(tem_getters)
+    tem_getters = delete_old_getters(tem_getters)
     execute_getters_for_tem(results, tem_getters)
     setter_django.input_in_django_db(results)
-    time.sleep(5 - (time.time() - current_time))
-    time_checker += 5
+    setter_django.delete_overdue_data()
+    if (time.time() - current_time) < 5:
+        time.sleep(5 - (time.time() - current_time))
+    time_checker += time.time() - current_time
     print("Прошло времени: " + str(time_checker) + 'сек')
     lead_time = time.time() - current_time
-    update_getters_time_for_tem(tem_getters,lead_time)
+    update_getters_time_for_tem(tem_getters, lead_time)
     setter_django.update_time(lead_time)
-
 
 # close_cursor_connection(djangodb_cursor, djangodb_connection)
 # clbdb.db_close_connection()
